@@ -100,15 +100,14 @@ body {
 
 /* Card Grid */
 #card-grid {
-  flex-grow: 1;
+  width: 100%;
+  max-width: 420px;
+  aspect-ratio: 1;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(4, 1fr);
   gap: 10px;
-  width: 100%;
-  max-height: 75vh;
-  margin: auto 0;
-  perspective: 800px;
+  margin: auto auto;
+  perspective: 1000px;
 }
 
 /* Grid adjustments for different counts if needed */

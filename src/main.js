@@ -422,15 +422,15 @@ function buildGrid(deck) {
       <div class="card-inner">
         <div class="card-front">?</div>
         <div class="card-back fruit-bg" style="--fruit-color: ${config.color};">
-          <span style="z-index: 5;">${config.emoji}</span>
           <div class="kawaii-face">
             <svg width="100%" height="100%" viewBox="0 0 100 100" style="position: absolute; top:0; left:0; width:100%; height:100%;">
-              <circle cx="34" cy="46" r="5" fill="#4a2511" />
-              <circle cx="66" cy="46" r="5" fill="#4a2511" />
-              <circle cx="26" cy="54" r="9" fill="rgba(255, 120, 150, 0.45)" />
-              <circle cx="74" cy="54" r="9" fill="rgba(255, 120, 150, 0.45)" />
-              <path d="M 44 54 Q 50 59 56 54" stroke="#4a2511" stroke-width="3" stroke-linecap="round" fill="none" />
-              <circle cx="28" cy="28" r="6" fill="rgba(255, 255, 255, 0.4)" />
+              <circle cx="28" cy="28" r="6" fill="rgba(255, 255, 255, 0.45)" />
+              <text x="50" y="52" font-size="58" text-anchor="middle" dominant-baseline="middle" filter="drop-shadow(0 2px 4px rgba(0,0,0,0.15))">${config.emoji}</text>
+              <circle cx="34" cy="48" r="5" fill="#4a2511" />
+              <circle cx="66" cy="48" r="5" fill="#4a2511" />
+              <circle cx="26" cy="55" r="9" fill="rgba(255, 120, 150, 0.45)" />
+              <circle cx="74" cy="55" r="9" fill="rgba(255, 120, 150, 0.45)" />
+              <path d="M 44 55 Q 50 60 56 55" stroke="#4a2511" stroke-width="3.5" stroke-linecap="round" fill="none" />
             </svg>
           </div>
         </div>
