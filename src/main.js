@@ -185,6 +185,7 @@ let currentScore = 0;
 let movesCount = 0;
 let comboMultiplier = 1;
 let isGameOver = false;
+let isGameActive = false; // Prevents card grid from rebuilding on snapshot updates
 
 // Card logic
 let firstCard = null;
@@ -273,7 +274,11 @@ function setupMultiplayerUI() {
 
       unsubscribeRoom = listenToRoom(roomCode, (data) => {
         if (data.status === 'playing') {
-          startGame(data.deck);
+          if (!isGameActive) {
+            startGame(data.deck);
+          } else {
+            handleMultiplayerUpdates(data);
+          }
         }
       });
     } else {
@@ -298,7 +303,11 @@ function setupMultiplayerUI() {
       // Room listener will trigger starting game once loaded
       unsubscribeRoom = listenToRoom(roomCode, (data) => {
         if (data.status === 'playing' && data.deck) {
-          startGame(data.deck);
+          if (!isGameActive) {
+            startGame(data.deck);
+          } else {
+            handleMultiplayerUpdates(data);
+          }
         }
       });
     } else {
@@ -310,24 +319,15 @@ function setupMultiplayerUI() {
 }
 
 function startGame(sharedDeck = null) {
+  if (isGameActive) return;
+  isGameActive = true;
+  
   if (audioCtx.state === 'suspended') audioCtx.resume();
   startScreen.classList.add('hidden');
   
   if (isMultiplayer) {
     opponentScoreContainer.classList.remove('hidden');
     uiHeader.classList.add('has-rival');
-    
-    if (isPlayer1 && unsubscribeRoom) {
-      unsubscribeRoom();
-      unsubscribeRoom = listenToRoom(roomCode, (data) => {
-        handleMultiplayerUpdates(data);
-      });
-    } else if (!isPlayer1) {
-      if (unsubscribeRoom) unsubscribeRoom();
-      unsubscribeRoom = listenToRoom(roomCode, (data) => {
-        handleMultiplayerUpdates(data);
-      });
-    }
   }
 
   resetGame(sharedDeck);
@@ -645,10 +645,49 @@ function createParticles(element, color) {
   }
 }
 
+// --- CSS Confetti win effect ---
+function triggerConfetti() {
+  const container = document.getElementById('game-container');
+  const colors = ['#ff60ad', '#8b5cf6', '#ffa500', '#4d4dff', '#ff4d4d', '#228b22'];
+  
+  for (let i = 0; i < 50; i++) {
+    const confetti = document.createElement('div');
+    confetti.style.position = 'absolute';
+    confetti.style.width = `${Math.random() * 6 + 6}px`;
+    confetti.style.height = `${Math.random() * 4 + 8}px`;
+    confetti.style.backgroundColor = colors[Math.floor(Math.random() * colors.length)];
+    confetti.style.left = `${Math.random() * 100}%`;
+    confetti.style.top = `-20px`;
+    confetti.style.opacity = '1';
+    confetti.style.zIndex = '90';
+    confetti.style.pointerEvents = 'none';
+    confetti.style.borderRadius = '2px';
+    confetti.style.transition = 'transform 2.5s linear, opacity 2.5s ease-out';
+    
+    container.appendChild(confetti);
+    
+    const drift = Math.random() * 160 - 80;
+    const spin = Math.random() * 720 - 360;
+    const fall = container.clientHeight + 40;
+    
+    confetti.offsetHeight; // Force reflow
+    
+    confetti.style.transform = `translate(${drift}px, ${fall}px) rotate(${spin}deg)`;
+    confetti.style.opacity = '0';
+    
+    setTimeout(() => {
+      confetti.remove();
+    }, 2500);
+  }
+}
+
 // --- Game Over states ---
 function triggerGameWin() {
   if (isGameOver) return;
   isGameOver = true;
+  isGameActive = false;
+  
+  triggerConfetti();
   
   document.getElementById('game-over-title').innerText = isMultiplayer ? "¡Victoria! 🎉" : "¡Completado! 🎉";
   finalScoreEl.innerText = currentScore;
@@ -672,9 +711,11 @@ function triggerGameWin() {
   }
 }
 
+// --- Trigger loss from opponent score/status update ---
 function triggerLoss() {
   if (isGameOver) return;
   isGameOver = true;
+  isGameActive = false;
   
   document.getElementById('game-over-title').innerText = "¡Derrota! 😢";
   finalScoreEl.innerText = currentScore;
