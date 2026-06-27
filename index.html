@@ -4,34 +4,41 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-    <title>Memory Suika Kawaii</title>
+    <title>🧠 Memory Suika Kawaii</title>
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
     <div id="game-container">
-      <div id="ui-layer">
-        <div class="score-container">
-          <div style="font-size: 16px; opacity: 0.9; margin-bottom: 2px;">Puntaje:</div>
-          <span id="score">0</span>
-          
-          <div id="opponent-score-container" class="hidden">
-            <div style="font-size: 14px; opacity: 0.8; margin-top: 10px; color: #ff69b4;">Rival:</div>
-            <span id="opponent-score" style="color: #ff69b4;">0</span>
-          </div>
+      <div id="ui-header">
+        <div class="stat-box">
+          <div class="label">Puntaje</div>
+          <div id="score" class="value">0</div>
         </div>
-
-        <div class="next-fruit-container">
-          <div style="font-size: 12px; opacity: 0.9; text-align: center; margin-bottom: 4px; color: var(--text-color); font-weight: bold;">Siguiente:</div>
-          <div id="next-fruit-preview"></div>
+        <div class="stat-box">
+          <div class="label">Movimientos</div>
+          <div id="moves" class="value">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="label">Combo</div>
+          <div id="combo" class="value">x1</div>
+        </div>
+        
+        <div id="opponent-score-container" class="stat-box hidden">
+          <div class="label" style="color: #ff60ad;">Rival</div>
+          <div id="opponent-score" class="value" style="color: #ff60ad;">0</div>
         </div>
       </div>
+
+      <!-- Card Grid Container -->
+      <div id="card-grid"></div>
     </div>
     
-    <!-- Game Over Overlay -->
+    <!-- Game Over Modal -->
     <div id="game-over-screen" class="hidden">
       <div class="game-over-modal">
-        <h1 id="game-over-title">¡Juego Terminado!</h1>
+        <h1 id="game-over-title">¡Completado! 🎉</h1>
         <p>Puntaje Final: <span id="final-score">0</span></p>
+        <p style="font-size: 14px; margin-top: -15px; opacity: 0.8;">Movimientos: <span id="final-moves">0</span></p>
         
         <div id="submit-score-section">
           <input type="text" id="player-name" placeholder="Tu Nombre" maxlength="15" />
@@ -54,21 +61,21 @@
       <div class="start-modal">
         <h1>🧠 Memory Suika</h1>
         <p style="font-size: 14px; margin-bottom: 20px; line-height: 1.4;">
-          ¡Lanza las burbujas boca abajo, encuéntrales pareja y fusiónalas para hacerlas crecer! Evita que se desborden.
+          ¡Encuentra las parejas de frutas iguales para fusionarlas en combos! En multijugador, haz parejas para lanzar rocas de bloqueo a tu rival.
         </p>
         
         <div id="mode-selection">
           <button id="play-solo-btn" class="menu-btn">Jugar Solo</button>
-          <button id="play-multi-btn" class="menu-btn secondary-btn">Modo Multijugador</button>
+          <button id="play-multi-btn" class="menu-btn secondary-btn">Modo Carrera (VS)</button>
         </div>
 
         <div id="multiplayer-lobby" class="hidden">
-          <h3>Salas Multijugador</h3>
+          <h3>Carrera VS en Tiempo Real</h3>
           <button id="create-room-btn" class="menu-btn">Crear Sala</button>
           
-          <div style="margin: 15px 0; font-weight: bold; color: var(--text-color);">O</div>
+          <div style="margin: 12px 0; font-weight: bold; color: var(--text-color);">O</div>
           
-          <input type="text" id="room-code-input" placeholder="Código de Sala (Ej. ABCD)" maxlength="4" style="text-transform: uppercase;"/>
+          <input type="text" id="room-code-input" placeholder="Código de Sala (Ej. FG4D)" maxlength="4" style="text-transform: uppercase;"/>
           <button id="join-room-btn" class="menu-btn secondary-btn">Unirse a Sala</button>
           
           <button id="back-to-menu-btn" style="margin-top: 15px; font-size: 14px; padding: 5px 10px; background: none; border: none; text-decoration: underline; color: #777; cursor: pointer; font-weight: bold;">Volver</button>
@@ -77,8 +84,8 @@
         <div id="waiting-room" class="hidden">
           <h3>Esperando rival...</h3>
           <p>Comparte este código de sala:</p>
-          <h2 id="room-code-display" style="letter-spacing: 5px; font-size: 40px; color: #ff69b4; margin: 15px 0; background: #fff0f5; padding: 10px; border-radius: 12px; border: 2px dashed #ffb6c1;">----</h2>
-          <p style="font-size: 13px; font-weight: normal;">Tu rival debe ingresar este código en su juego para iniciar.</p>
+          <h2 id="room-code-display">----</h2>
+          <p style="font-size: 13px; font-weight: normal; margin-top: 15px;">Tu rival iniciará la carrera ingresando este código en su juego.</p>
         </div>
       </div>
     </div>
