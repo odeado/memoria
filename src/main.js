@@ -55,7 +55,7 @@ function playMergeSound(tier) {
   const osc2 = audioCtx.createOscillator();
   const gainNode = audioCtx.createGain();
   
-  const baseFreq = 320 + (tier * 40);
+  const baseFreq = 320 + (tier * 30);
   
   osc1.type = 'sine';
   osc1.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
@@ -76,6 +76,48 @@ function playMergeSound(tier) {
   osc2.start();
   osc1.stop(audioCtx.currentTime + 0.25);
   osc2.stop(audioCtx.currentTime + 0.25);
+}
+
+function playRockHitSound() {
+  if (audioCtx.state === 'suspended') return;
+  const osc = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+  osc.type = 'triangle';
+  osc.frequency.setValueAtTime(140, audioCtx.currentTime);
+  osc.frequency.linearRampToValueAtTime(70, audioCtx.currentTime + 0.12);
+  gainNode.gain.setValueAtTime(0.25, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
+  osc.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + 0.12);
+}
+
+function playRockBreakSound() {
+  if (audioCtx.state === 'suspended') return;
+  const osc1 = audioCtx.createOscillator();
+  const osc2 = audioCtx.createOscillator();
+  const gainNode = audioCtx.createGain();
+  
+  osc1.type = 'sawtooth';
+  osc1.frequency.setValueAtTime(180, audioCtx.currentTime);
+  osc1.frequency.linearRampToValueAtTime(45, audioCtx.currentTime + 0.22);
+  
+  osc2.type = 'triangle';
+  osc2.frequency.setValueAtTime(750, audioCtx.currentTime);
+  osc2.frequency.exponentialRampToValueAtTime(1400, audioCtx.currentTime + 0.18);
+  
+  gainNode.gain.setValueAtTime(0.16, audioCtx.currentTime);
+  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
+  
+  osc1.connect(gainNode);
+  osc2.connect(gainNode);
+  gainNode.connect(audioCtx.destination);
+  
+  osc1.start();
+  osc2.start();
+  osc1.stop(audioCtx.currentTime + 0.22);
+  osc2.stop(audioCtx.currentTime + 0.22);
 }
 
 // BGM System
@@ -121,7 +163,7 @@ function startBGM() {
   }, 2600);
 }
 
-// --- Fruit Configuration ---
+// --- Fruit Configuration (20 items for Level 2 & 3 support) ---
 const FRUITS = [
   { name: "Arándano", color: '#4d4dff', emoji: '🫐', points: 10 },
   { name: "Cereza", color: '#ff4d4d', emoji: '🍒', points: 20 },
@@ -136,6 +178,13 @@ const FRUITS = [
   { name: "Piña", color: '#ffe4b5', emoji: '🍍', points: 190 },
   { name: "Melón", color: '#90ee90', emoji: '🍈', points: 220 },
   { name: "Sandía", color: '#228b22', emoji: '🍉', points: 260 },
+  { name: "Aguacate", color: '#a3e635', emoji: '🥑', points: 300 },
+  { name: "Plátano", color: '#fef08a', emoji: '🍌', points: 340 },
+  { name: "Kiwi", color: '#84cc16', emoji: '🥝', points: 385 },
+  { name: "Hongo", color: '#f87171', emoji: '🍄', points: 430 },
+  { name: "Flor", color: '#fbcfe8', emoji: '🌸', points: 480 },
+  { name: "Estrella", color: '#fde047', emoji: '⭐️', points: 530 },
+  { name: "Zanahoria", color: '#fb923c', emoji: '🥕', points: 590 }
 ];
 
 // --- Game State Variables ---
@@ -144,6 +193,7 @@ let movesCount = 0;
 let comboMultiplier = 1;
 let isGameOver = false;
 let isGameActive = false; // Prevents card grid from rebuilding on snapshot updates
+let currentLevel = 1; // Level state (ranges 1 to 3)
 
 // Card logic (Solo Mode)
 let firstCard = null;
@@ -173,8 +223,10 @@ const gameOverScreen = document.getElementById('game-over-screen');
 const finalScoreEl = document.getElementById('final-score');
 const finalMovesEl = document.getElementById('final-moves');
 const restartBtn = document.getElementById('restart-button');
+const nextLevelBtn = document.getElementById('next-level-btn');
 const uiHeader = document.getElementById('ui-header');
 const turnIndicator = document.getElementById('turn-indicator');
+const levelValEl = document.getElementById('level-val');
 
 // Multiplayer DOM
 const playSoloBtn = document.getElementById('play-solo-btn');
@@ -226,8 +278,8 @@ function setupMultiplayerUI() {
       waitingRoom.classList.remove('hidden');
       roomCodeDisplay.innerText = roomCode;
       
-      const sharedDeck = generateRandomDeck();
-      await updateRoomGameData(roomCode, { deck: sharedDeck });
+      const sharedDeck = generateRandomDeckForLevel(1);
+      await updateRoomGameData(roomCode, { deck: sharedDeck, level: 1 });
 
       unsubscribeRoom = listenToRoom(roomCode, (data) => {
         if (data.status === 'playing') {
@@ -291,19 +343,41 @@ function startGame(roomData = null) {
 }
 
 function handleMultiplayerUpdates(data) {
+  // If the deck changed, it means we transitioned to a new level! Rebuild the grid.
+  if (currentRoomData && data.deck && JSON.stringify(currentRoomData.deck) !== JSON.stringify(data.deck)) {
+    currentRoomData = data;
+    resetGame(data);
+    return;
+  }
+  
   currentRoomData = data;
   
-  if (data.status === 'player1_won') {
-    if (isPlayer1) triggerWin(); else triggerLoss();
-    return;
-  }
-  if (data.status === 'player2_won') {
-    if (!isPlayer1) triggerWin(); else triggerLoss();
-    return;
-  }
-  if (data.status === 'draw') {
-    triggerDraw();
-    return;
+  // Update Level UI
+  levelValEl.innerText = data.level || 1;
+  
+  const matchedIndices = data.matched || [];
+  
+  // Check if level has been completed (matched count equals total deck size)
+  if (data.deck && matchedIndices.length === data.deck.length) {
+    if (data.level < 3) {
+      // Level 1 or 2 completed: show Level Complete modal
+      showLevelCompleteModal(data.level);
+      return;
+    } else {
+      // Level 3 completed: handle final tournament outcome
+      if (data.status === 'player1_won') {
+        if (isPlayer1) triggerWin(); else triggerLoss();
+        return;
+      }
+      if (data.status === 'player2_won') {
+        if (!isPlayer1) triggerWin(); else triggerLoss();
+        return;
+      }
+      if (data.status === 'draw') {
+        triggerDraw();
+        return;
+      }
+    }
   }
 
   // Update scores
@@ -329,7 +403,6 @@ function handleMultiplayerUpdates(data) {
   // Synchronize cards
   const cards = Array.from(document.querySelectorAll('.card'));
   const flippedIndices = data.flipped || [];
-  const matchedIndices = data.matched || [];
 
   // Sound triggers: play flip sound when opponent flips a card
   flippedIndices.forEach(idx => {
@@ -367,17 +440,29 @@ function handleMultiplayerUpdates(data) {
       card.classList.remove('flipped', 'matched', 'shaking');
     }
   });
+
+  // Apply initial rock blocks if in Level 3
+  if (data.level === 3 && data.rocks) {
+    data.rocks.forEach(idx => {
+      const cardEl = cards.find(c => parseInt(c.dataset.index) === idx);
+      if (cardEl && !cardEl.classList.contains('has-rock') && !matchedIndices.includes(idx)) {
+        cardEl.classList.add('has-rock');
+        cardEl.dataset.rockHits = 0;
+        
+        const rockDiv = document.createElement('div');
+        rockDiv.className = 'rock-overlay';
+        rockDiv.innerText = '🪨';
+        cardEl.appendChild(rockDiv);
+      }
+    });
+  }
 }
 
 function resetGame(roomData = null) {
   isGameOver = false;
-  currentScore = 0;
-  movesCount = 0;
-  comboMultiplier = 1;
   firstCard = null;
   secondCard = null;
   lockBoard = false;
-  activePairsLeft = 8;
   prevFlipped = [];
   prevMatchedCount = 0;
   currentRoomData = roomData;
@@ -385,19 +470,46 @@ function resetGame(roomData = null) {
   if (mismatchTimeout) clearTimeout(mismatchTimeout);
   mismatchTimeout = null;
 
-  scoreEl.innerText = "0";
-  movesEl.innerText = "0";
-  comboEl.innerText = "x1";
-  
   gameOverScreen.classList.add('hidden');
+  nextLevelBtn.classList.add('hidden');
   cardGrid.innerHTML = '';
   
   if (isMultiplayer && roomData) {
+    // Multiplayer board setup
+    currentLevel = roomData.level || 1;
+    levelValEl.innerText = currentLevel;
+    
+    // 6x6 grid styling class
+    if (currentLevel >= 2) {
+      cardGrid.className = 'grid-6x6';
+      activePairsLeft = 18;
+    } else {
+      cardGrid.className = '';
+      activePairsLeft = 8;
+    }
+    
     buildGrid(roomData.deck);
     handleMultiplayerUpdates(roomData);
   } else {
-    const deck = generateRandomDeck();
+    // Solo board setup
+    levelValEl.innerText = currentLevel;
+    
+    if (currentLevel >= 2) {
+      cardGrid.className = 'grid-6x6';
+      activePairsLeft = 18;
+    } else {
+      cardGrid.className = '';
+      activePairsLeft = 8;
+    }
+    
+    const deck = generateRandomDeckForLevel(currentLevel);
     buildGrid(deck);
+    
+    // Level 3 Solo initial rock obstacle placements
+    if (currentLevel === 3) {
+      setTimeout(() => applyInitialSoloRocks(4), 100);
+    }
+    
     turnIndicator.classList.add('hidden');
   }
   
@@ -405,11 +517,31 @@ function resetGame(roomData = null) {
   startBGM();
 }
 
-// Generate 8 pairs of random distinct fruits from the 12 total, and shuffle
-function generateRandomDeck() {
-  const allTiers = Array.from({length: 12}, (_, i) => i);
+function applyInitialSoloRocks(count) {
+  const cards = Array.from(document.querySelectorAll('.card'));
+  const targets = [...cards];
+  
+  for (let i = 0; i < count; i++) {
+    if (targets.length === 0) break;
+    const idx = Math.floor(Math.random() * targets.length);
+    const targetCard = targets.splice(idx, 1)[0];
+    
+    targetCard.classList.add('has-rock');
+    targetCard.dataset.rockHits = 0;
+    
+    const rockDiv = document.createElement('div');
+    rockDiv.className = 'rock-overlay';
+    rockDiv.innerText = '🪨';
+    targetCard.appendChild(rockDiv);
+  }
+}
+
+// Generate shuffled deck layout for a given level (8 pairs for L1, 18 pairs for L2 & L3)
+function generateRandomDeckForLevel(level) {
+  const numPairs = (level === 1) ? 8 : 18;
+  const allTiers = Array.from({length: 20}, (_, i) => i);
   const selectedTiers = [];
-  while (selectedTiers.length < 8) {
+  while (selectedTiers.length < numPairs) {
     const idx = Math.floor(Math.random() * allTiers.length);
     selectedTiers.push(allTiers.splice(idx, 1)[0]);
   }
@@ -463,6 +595,11 @@ function handleCardClick(card) {
 
   const idx = parseInt(card.dataset.index);
 
+  if (card.classList.contains('has-rock')) {
+    handleRockHit(card);
+    return;
+  }
+
   if (isMultiplayer) {
     // --- MULTIPLAYER TURN-BASED SHARING BOARD LOGIC ---
     if (!currentRoomData) return;
@@ -470,24 +607,20 @@ function handleCardClick(card) {
     const flipped = currentRoomData.flipped || [];
     const matched = currentRoomData.matched || [];
     
-    // Ignore already flipped or matched card clicks
     if (flipped.includes(idx) || matched.includes(idx)) return;
     
-    lockBoard = true; // Temporary client lock during network transition
+    lockBoard = true; 
     
     if (flipped.length === 0) {
-      // First card flipped
       playFlipSound();
       updateRoomGameData(roomCode, { flipped: [idx] });
     } else if (flipped.length === 1) {
-      // Second card flipped
       const firstIdx = flipped[0];
       const secondIdx = idx;
       
       playFlipSound();
       updateRoomGameData(roomCode, { flipped: [firstIdx, secondIdx] });
       
-      // Compare cards from deck
       const deck = currentRoomData.deck;
       if (deck[firstIdx] === deck[secondIdx]) {
         // Match!
@@ -505,15 +638,18 @@ function handleCardClick(card) {
           };
           updates[`${fieldPrefix}.score`] = newScore;
           
-          // Check win condition (16 cards total matched)
-          if (newMatched.length === 16) {
-            const oppScore = isPlayer1 ? currentRoomData.player2.score : currentRoomData.player1.score;
-            if (newScore > oppScore) {
-              updates.status = isPlayer1 ? 'player1_won' : 'player2_won';
-            } else if (newScore < oppScore) {
-              updates.status = isPlayer1 ? 'player2_won' : 'player1_won';
-            } else {
-              updates.status = 'draw';
+          // Check win condition (all cards matched)
+          if (newMatched.length === deck.length) {
+            if (currentRoomData.level === 3) {
+              // Final tournament level completed: declare winner
+              const oppScore = isPlayer1 ? currentRoomData.player2.score : currentRoomData.player1.score;
+              if (newScore > oppScore) {
+                updates.status = isPlayer1 ? 'player1_won' : 'player2_won';
+              } else if (newScore < oppScore) {
+                updates.status = isPlayer1 ? 'player2_won' : 'player1_won';
+              } else {
+                updates.status = 'draw';
+              }
             }
           }
           
@@ -523,7 +659,6 @@ function handleCardClick(card) {
       } else {
         // Mismatch!
         setTimeout(async () => {
-          // Shake them locally
           const firstCardEl = document.querySelector(`.card[data-index="${firstIdx}"]`);
           const secondCardEl = document.querySelector(`.card[data-index="${secondIdx}"]`);
           if (firstCardEl) firstCardEl.classList.add('shaking');
@@ -532,7 +667,6 @@ function handleCardClick(card) {
           playMismatchSound();
           
           setTimeout(async () => {
-            // Flip back and change turn
             const nextTurn = currentRoomData.turn === 'player1' ? 'player2' : 'player1';
             await updateRoomGameData(roomCode, {
               flipped: [],
@@ -547,7 +681,6 @@ function handleCardClick(card) {
     // --- SOLO MODE LOCAL LOGIC ---
     if (card.classList.contains('flipped') || card.classList.contains('matched')) return;
 
-    // Reset pending mismatch immediately on third click
     if (mismatchTimeout) {
       clearTimeout(mismatchTimeout);
       mismatchTimeout = null;
@@ -592,7 +725,11 @@ function handleCardClick(card) {
           
           activePairsLeft--;
           if (activePairsLeft === 0) {
-            triggerGameWin();
+            if (currentLevel < 3) {
+              showLevelCompleteModal(currentLevel);
+            } else {
+              triggerGameWin();
+            }
           }
           
           firstCard = null;
@@ -620,6 +757,28 @@ function handleCardClick(card) {
         }, 1000);
       }
     }
+  }
+}
+
+// --- Rock Punishment Interaction ---
+function handleRockHit(card) {
+  const rock = card.querySelector('.rock-overlay');
+  if (!rock) return;
+  
+  let hits = parseInt(card.dataset.rockHits || 0) + 1;
+  card.dataset.rockHits = hits;
+  
+  rock.classList.add('shaking');
+  setTimeout(() => rock.classList.remove('shaking'), 250);
+  
+  if (hits >= 3) {
+    rock.remove();
+    card.classList.remove('has-rock');
+    card.dataset.rockHits = 0;
+    playRockBreakSound();
+    createParticles(card, '#7f8c8d');
+  } else {
+    playRockHitSound();
   }
 }
 
@@ -700,15 +859,61 @@ function triggerConfetti() {
   }
 }
 
-// --- Game Over states ---
+// --- Intermediate Level Completion Modal ---
+function showLevelCompleteModal(level) {
+  isGameOver = true;
+  document.getElementById('game-over-title').innerText = "¡Nivel Completado! 🎉";
+  finalScoreEl.innerText = currentScore;
+  finalMovesEl.innerText = movesCount;
+  
+  // Hide submit score (only allowed after Level 3 final victory)
+  document.getElementById('submit-score-section').style.display = 'none';
+  
+  // Show Next Level button
+  nextLevelBtn.classList.remove('hidden');
+  nextLevelBtn.innerText = `Jugar Nivel ${level + 1}`;
+  restartBtn.innerText = 'Salir al Menú';
+  
+  gameOverScreen.classList.remove('hidden');
+}
+
+async function progressMultiplayerLevel() {
+  if (!currentRoomData) return;
+  
+  const nextLevel = currentRoomData.level + 1;
+  const sharedDeck = generateRandomDeckForLevel(nextLevel);
+  
+  const updates = {
+    level: nextLevel,
+    deck: sharedDeck,
+    flipped: [],
+    matched: [],
+    status: 'playing'
+  };
+  
+  // Sync rock coordinates for Level 3
+  if (nextLevel === 3) {
+    const rockIndices = [];
+    while (rockIndices.length < 4) {
+      const r = Math.floor(Math.random() * 36);
+      if (!rockIndices.includes(r)) rockIndices.push(r);
+    }
+    updates.rocks = rockIndices;
+  }
+  
+  await updateRoomGameData(roomCode, updates);
+}
+
+// --- Final Tournament GameOver states ---
 function triggerGameWin() {
   if (isGameOver) return;
   isGameOver = true;
   isGameActive = false;
+  currentLevel = 1; // Reset level for next new game
   
   triggerConfetti();
   
-  document.getElementById('game-over-title').innerText = isMultiplayer ? "¡Victoria! 🎉" : "¡Completado! 🎉";
+  document.getElementById('game-over-title').innerText = isMultiplayer ? "¡Victoria Total! 🏆" : "¡Victoria Total! 🏆";
   finalScoreEl.innerText = currentScore;
   finalMovesEl.innerText = movesCount;
   
@@ -717,6 +922,9 @@ function triggerGameWin() {
   const submitBtn = document.getElementById('submit-score-btn');
   submitBtn.disabled = false;
   submitBtn.innerText = 'Guardar Puntaje';
+  
+  nextLevelBtn.classList.add('hidden');
+  restartBtn.innerText = 'Volver al Menú';
   
   gameOverScreen.classList.remove('hidden');
   loadLeaderboard();
@@ -733,6 +941,7 @@ function triggerLoss() {
   if (isGameOver) return;
   isGameOver = true;
   isGameActive = false;
+  currentLevel = 1;
   
   document.getElementById('game-over-title').innerText = "¡Derrota! 😢";
   finalScoreEl.innerText = currentScore;
@@ -743,6 +952,9 @@ function triggerLoss() {
   const submitBtn = document.getElementById('submit-score-btn');
   submitBtn.disabled = false;
   submitBtn.innerText = 'Guardar Puntaje';
+  
+  nextLevelBtn.classList.add('hidden');
+  restartBtn.innerText = 'Volver al Menú';
   
   gameOverScreen.classList.remove('hidden');
   loadLeaderboard();
@@ -757,6 +969,7 @@ function triggerDraw() {
   if (isGameOver) return;
   isGameOver = true;
   isGameActive = false;
+  currentLevel = 1;
   
   document.getElementById('game-over-title').innerText = "¡Empate! 🤝";
   finalScoreEl.innerText = currentScore;
@@ -767,6 +980,9 @@ function triggerDraw() {
   const submitBtn = document.getElementById('submit-score-btn');
   submitBtn.disabled = false;
   submitBtn.innerText = 'Guardar Puntaje';
+  
+  nextLevelBtn.classList.add('hidden');
+  restartBtn.innerText = 'Volver al Menú';
   
   gameOverScreen.classList.remove('hidden');
   loadLeaderboard();
@@ -803,6 +1019,15 @@ async function loadLeaderboard() {
 function setupInput() {
   restartBtn.addEventListener('click', () => {
     window.location.reload(); 
+  });
+  
+  nextLevelBtn.addEventListener('click', () => {
+    if (!isMultiplayer) {
+      currentLevel++;
+      resetGame();
+    } else {
+      progressMultiplayerLevel();
+    }
   });
   
   document.getElementById('submit-score-btn').addEventListener('click', async () => {
