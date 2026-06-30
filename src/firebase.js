@@ -72,9 +72,13 @@ export const createRoom = async (roomCode) => {
   try {
     const roomDoc = doc(roomsRef, roomCode);
     await setDoc(roomDoc, {
-      player1: { score: 0, punishments: 0 },
+      player1: { score: 0 },
       player2: null,
-      status: 'waiting'
+      status: 'waiting',
+      deck: null,
+      turn: 'player1',
+      flipped: [],
+      matched: []
     });
     return true;
   } catch (error) {
@@ -94,7 +98,7 @@ export const joinRoom = async (roomCode) => {
     if (data.status !== 'waiting') return false;
 
     await updateDoc(roomDoc, {
-      player2: { score: 0, punishments: 0 },
+      player2: { score: 0 },
       status: 'playing'
     });
     return true;
@@ -113,6 +117,15 @@ export const listenToRoom = (roomCode, callback) => {
   });
 };
 
+export const updateRoomGameData = async (roomCode, updates) => {
+  try {
+    const roomDoc = doc(roomsRef, roomCode);
+    await updateDoc(roomDoc, updates);
+  } catch (error) {
+    console.error("Error updating room game data: ", error);
+  }
+};
+
 export const updateRoomState = async (roomCode, isPlayer1, dataToUpdate, status = null) => {
   try {
     const roomDoc = doc(roomsRef, roomCode);
@@ -120,32 +133,10 @@ export const updateRoomState = async (roomCode, isPlayer1, dataToUpdate, status 
     
     const updates = {};
     if (dataToUpdate.score !== undefined) updates[`${fieldPrefix}.score`] = dataToUpdate.score;
-    if (dataToUpdate.punishments !== undefined) updates[`${fieldPrefix}.punishments`] = dataToUpdate.punishments;
     if (status !== null) updates.status = status;
     
     await updateDoc(roomDoc, updates);
   } catch (error) {
     console.error("Error updating room state: ", error);
-  }
-};
-
-export const sendPunishment = async (roomCode, isPlayer1) => {
-  try {
-    const roomDoc = doc(roomsRef, roomCode);
-    // Send punishment to the OTHER player
-    const targetField = isPlayer1 ? 'player2.punishments' : 'player1.punishments';
-    
-    const snapshot = await getDocs(query(roomsRef, where("__name__", "==", roomCode)));
-    if(!snapshot.empty){
-        const data = snapshot.docs[0].data();
-        const targetPlayer = isPlayer1 ? data.player2 : data.player1;
-        if(targetPlayer){
-             const updates = {};
-             updates[targetField] = (targetPlayer.punishments || 0) + 1;
-             await updateDoc(roomDoc, updates);
-        }
-    }
-  } catch (error) {
-    console.error("Error sending punishment: ", error);
   }
 };

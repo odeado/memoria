@@ -1,5 +1,5 @@
 import './style.css';
-import { saveScore, getTopScores, createRoom, joinRoom, listenToRoom, updateRoomState, sendPunishment } from './firebase.js';
+import { saveScore, getTopScores, createRoom, joinRoom, listenToRoom, updateRoomState, updateRoomGameData } from './firebase.js';
 
 // --- Audio System (Web Audio API Synth) ---
 const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -78,48 +78,6 @@ function playMergeSound(tier) {
   osc2.stop(audioCtx.currentTime + 0.25);
 }
 
-function playRockHitSound() {
-  if (audioCtx.state === 'suspended') return;
-  const osc = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain();
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(140, audioCtx.currentTime);
-  osc.frequency.linearRampToValueAtTime(70, audioCtx.currentTime + 0.12);
-  gainNode.gain.setValueAtTime(0.25, audioCtx.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
-  osc.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.12);
-}
-
-function playRockBreakSound() {
-  if (audioCtx.state === 'suspended') return;
-  const osc1 = audioCtx.createOscillator();
-  const osc2 = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain();
-  
-  osc1.type = 'sawtooth';
-  osc1.frequency.setValueAtTime(180, audioCtx.currentTime);
-  osc1.frequency.linearRampToValueAtTime(45, audioCtx.currentTime + 0.22);
-  
-  osc2.type = 'triangle';
-  osc2.frequency.setValueAtTime(750, audioCtx.currentTime);
-  osc2.frequency.exponentialRampToValueAtTime(1400, audioCtx.currentTime + 0.18);
-  
-  gainNode.gain.setValueAtTime(0.16, audioCtx.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
-  
-  osc1.connect(gainNode);
-  osc2.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-  
-  osc1.start();
-  osc2.start();
-  osc1.stop(audioCtx.currentTime + 0.22);
-  osc2.stop(audioCtx.currentTime + 0.22);
-}
-
 // BGM System
 let bgmGain = null;
 let bgmInterval = null;
@@ -187,7 +145,7 @@ let comboMultiplier = 1;
 let isGameOver = false;
 let isGameActive = false; // Prevents card grid from rebuilding on snapshot updates
 
-// Card logic
+// Card logic (Solo Mode)
 let firstCard = null;
 let secondCard = null;
 let lockBoard = false;
@@ -198,8 +156,12 @@ let isMultiplayer = false;
 let roomCode = null;
 let isPlayer1 = false;
 let unsubscribeRoom = null;
-let localPunishmentCount = 0;
-let activePairsLeft = 8; // standard 4x4 has 8 pairs
+let activePairsLeft = 8; 
+let currentRoomData = null;
+
+// Spectator Sound States
+let prevFlipped = [];
+let prevMatchedCount = 0;
 
 // DOM Elements
 const scoreEl = document.getElementById('score');
@@ -212,6 +174,7 @@ const finalScoreEl = document.getElementById('final-score');
 const finalMovesEl = document.getElementById('final-moves');
 const restartBtn = document.getElementById('restart-button');
 const uiHeader = document.getElementById('ui-header');
+const turnIndicator = document.getElementById('turn-indicator');
 
 // Multiplayer DOM
 const playSoloBtn = document.getElementById('play-solo-btn');
@@ -263,19 +226,13 @@ function setupMultiplayerUI() {
       waitingRoom.classList.remove('hidden');
       roomCodeDisplay.innerText = roomCode;
       
-      // Seed deck layout so both players have the exact same grid
       const sharedDeck = generateRandomDeck();
-      await updateRoomState(roomCode, true, { score: 0 }, null);
-      
-      // Update room status with deck
-      const roomsRef = await import('firebase/firestore').then(m => m.collection(m.getFirestore(), "games", "memory_suika", "rooms"));
-      const roomDoc = await import('firebase/firestore').then(m => m.doc(roomsRef, roomCode));
-      await import('firebase/firestore').then(m => m.updateDoc(roomDoc, { deck: sharedDeck }));
+      await updateRoomGameData(roomCode, { deck: sharedDeck });
 
       unsubscribeRoom = listenToRoom(roomCode, (data) => {
         if (data.status === 'playing') {
           if (!isGameActive) {
-            startGame(data.deck);
+            startGame(data);
           } else {
             handleMultiplayerUpdates(data);
           }
@@ -300,11 +257,10 @@ function setupMultiplayerUI() {
     
     const success = await joinRoom(code);
     if (success) {
-      // Room listener will trigger starting game once loaded
       unsubscribeRoom = listenToRoom(roomCode, (data) => {
         if (data.status === 'playing' && data.deck) {
           if (!isGameActive) {
-            startGame(data.deck);
+            startGame(data);
           } else {
             handleMultiplayerUpdates(data);
           }
@@ -318,7 +274,7 @@ function setupMultiplayerUI() {
   });
 }
 
-function startGame(sharedDeck = null) {
+function startGame(roomData = null) {
   if (isGameActive) return;
   isGameActive = true;
   
@@ -328,52 +284,104 @@ function startGame(sharedDeck = null) {
   if (isMultiplayer) {
     opponentScoreContainer.classList.remove('hidden');
     uiHeader.classList.add('has-rival');
+    turnIndicator.classList.remove('hidden');
   }
 
-  resetGame(sharedDeck);
+  resetGame(roomData);
 }
 
 function handleMultiplayerUpdates(data) {
-  if (data.status === 'player1_lost' && !isPlayer1) {
-    triggerWin();
+  currentRoomData = data;
+  
+  if (data.status === 'player1_won') {
+    if (isPlayer1) triggerWin(); else triggerLoss();
     return;
   }
-  if (data.status === 'player2_lost' && isPlayer1) {
-    triggerWin();
+  if (data.status === 'player2_won') {
+    if (!isPlayer1) triggerWin(); else triggerLoss();
     return;
   }
-  if (data.status === 'player1_won' && !isPlayer1) {
-    triggerLoss();
-    return;
-  }
-  if (data.status === 'player2_won' && isPlayer1) {
-    triggerLoss();
+  if (data.status === 'draw') {
+    triggerDraw();
     return;
   }
 
-  const opponentData = isPlayer1 ? data.player2 : data.player1;
-  const myData = isPlayer1 ? data.player1 : data.player2;
+  // Update scores
+  const myScore = isPlayer1 ? data.player1.score : data.player2.score;
+  const oppScore = isPlayer1 ? (data.player2 ? data.player2.score : 0) : data.player1.score;
   
-  if (opponentData) {
-    opponentScoreEl.innerText = opponentData.score;
+  currentScore = myScore;
+  scoreEl.innerText = myScore;
+  opponentScoreEl.innerText = oppScore;
+
+  // Turn Indicator
+  const isMyTurn = (isPlayer1 && data.turn === 'player1') || (!isPlayer1 && data.turn === 'player2');
+  if (isMyTurn) {
+    turnIndicator.innerText = "🟢 Tu Turno";
+    turnIndicator.className = "my-turn";
+    lockBoard = false;
+  } else {
+    turnIndicator.innerText = "🔴 Turno del Rival";
+    turnIndicator.className = "rival-turn";
+    lockBoard = true;
   }
-  if (myData && myData.punishments > localPunishmentCount) {
-    const newPunishments = myData.punishments - localPunishmentCount;
-    applyRockPunishments(newPunishments);
-    localPunishmentCount = myData.punishments;
+
+  // Synchronize cards
+  const cards = Array.from(document.querySelectorAll('.card'));
+  const flippedIndices = data.flipped || [];
+  const matchedIndices = data.matched || [];
+
+  // Sound triggers: play flip sound when opponent flips a card
+  flippedIndices.forEach(idx => {
+    if (!prevFlipped.includes(idx)) {
+      playFlipSound();
+    }
+  });
+  prevFlipped = [...flippedIndices];
+
+  // Sound triggers: play merge sound when opponent makes a match
+  if (matchedIndices.length > prevMatchedCount) {
+    const newlyMatchedIndex = matchedIndices[matchedIndices.length - 1];
+    const tier = data.deck[newlyMatchedIndex];
+    playMergeSound(tier);
+    
+    // Spawn particles on matched cards
+    matchedIndices.forEach(idx => {
+      const cardEl = cards.find(c => parseInt(c.dataset.index) === idx);
+      if (cardEl && !cardEl.classList.contains('matched')) {
+        createParticles(cardEl, FRUITS[tier].color);
+      }
+    });
+    
+    prevMatchedCount = matchedIndices.length;
   }
+
+  // Apply visual classes
+  cards.forEach(card => {
+    const idx = parseInt(card.dataset.index);
+    if (matchedIndices.includes(idx)) {
+      card.classList.add('matched', 'flipped');
+    } else if (flippedIndices.includes(idx)) {
+      card.classList.add('flipped');
+    } else {
+      card.classList.remove('flipped', 'matched', 'shaking');
+    }
+  });
 }
 
-function resetGame(sharedDeck = null) {
+function resetGame(roomData = null) {
   isGameOver = false;
   currentScore = 0;
   movesCount = 0;
   comboMultiplier = 1;
-  localPunishmentCount = 0;
   firstCard = null;
   secondCard = null;
   lockBoard = false;
   activePairsLeft = 8;
+  prevFlipped = [];
+  prevMatchedCount = 0;
+  currentRoomData = roomData;
+  
   if (mismatchTimeout) clearTimeout(mismatchTimeout);
   mismatchTimeout = null;
 
@@ -382,12 +390,17 @@ function resetGame(sharedDeck = null) {
   comboEl.innerText = "x1";
   
   gameOverScreen.classList.add('hidden');
-  
-  // Clean card grid
   cardGrid.innerHTML = '';
   
-  const deck = sharedDeck || generateRandomDeck();
-  buildGrid(deck);
+  if (isMultiplayer && roomData) {
+    buildGrid(roomData.deck);
+    handleMultiplayerUpdates(roomData);
+  } else {
+    const deck = generateRandomDeck();
+    buildGrid(deck);
+    turnIndicator.classList.add('hidden');
+  }
+  
   playPopSound();
   startBGM();
 }
@@ -448,157 +461,165 @@ function handleCardClick(card) {
   
   if (audioCtx.state === 'suspended') audioCtx.resume();
 
-  // 1. Check if card has a rock punishment blocking it
-  if (card.classList.contains('has-rock')) {
-    handleRockHit(card);
-    return;
-  }
+  const idx = parseInt(card.dataset.index);
 
-  // If already flipped or matched, ignore
-  if (card.classList.contains('flipped') || card.classList.contains('matched')) return;
-
-  // Clear pending mismatch immediately if they click a third card
-  if (mismatchTimeout) {
-    clearTimeout(mismatchTimeout);
-    mismatchTimeout = null;
-    if (firstCard) firstCard.classList.remove('flipped', 'shaking');
-    if (secondCard) secondCard.classList.remove('flipped', 'shaking');
-    firstCard = null;
-    secondCard = null;
-    lockBoard = false;
-  }
-
-  card.classList.add('flipped');
-  playFlipSound();
-
-  if (!firstCard) {
-    firstCard = card;
-  } else if (!secondCard) {
-    secondCard = card;
-    movesCount++;
-    movesEl.innerText = movesCount;
+  if (isMultiplayer) {
+    // --- MULTIPLAYER TURN-BASED SHARING BOARD LOGIC ---
+    if (!currentRoomData) return;
     
-    // Compare
-    if (firstCard.dataset.tier === secondCard.dataset.tier) {
-      // Match!
-      lockBoard = true;
-      const tier = parseInt(firstCard.dataset.tier);
-      const c1 = firstCard;
-      const c2 = secondCard;
+    const flipped = currentRoomData.flipped || [];
+    const matched = currentRoomData.matched || [];
+    
+    // Ignore already flipped or matched card clicks
+    if (flipped.includes(idx) || matched.includes(idx)) return;
+    
+    lockBoard = true; // Temporary client lock during network transition
+    
+    if (flipped.length === 0) {
+      // First card flipped
+      playFlipSound();
+      updateRoomGameData(roomCode, { flipped: [idx] });
+    } else if (flipped.length === 1) {
+      // Second card flipped
+      const firstIdx = flipped[0];
+      const secondIdx = idx;
       
-      setTimeout(() => {
-        c1.classList.add('matched');
-        c2.classList.add('matched');
-        
-        createParticles(c1, FRUITS[tier].color);
-        createParticles(c2, FRUITS[tier].color);
-        
-        // Calculate points based on fruit tier and combo
-        const basePoints = FRUITS[tier].points;
-        const pointsGained = basePoints * comboMultiplier;
-        currentScore += pointsGained;
-        scoreEl.innerText = currentScore;
-        
-        playMergeSound(tier);
-        
-        // Sincronizar en multijugador
-        if (isMultiplayer) {
-          updateRoomState(roomCode, isPlayer1, { score: currentScore });
+      playFlipSound();
+      updateRoomGameData(roomCode, { flipped: [firstIdx, secondIdx] });
+      
+      // Compare cards from deck
+      const deck = currentRoomData.deck;
+      if (deck[firstIdx] === deck[secondIdx]) {
+        // Match!
+        const tier = deck[firstIdx];
+        setTimeout(async () => {
+          const newMatched = [...matched, firstIdx, secondIdx];
           
-          // Send punishment for Combos >= 2 OR matching Mandarina (tier 5) or above
-          if (comboMultiplier >= 2 || tier >= 5) {
-            sendPunishment(roomCode, isPlayer1);
+          const fieldPrefix = isPlayer1 ? 'player1' : 'player2';
+          const myCurrentScore = isPlayer1 ? currentRoomData.player1.score : currentRoomData.player2.score;
+          const newScore = myCurrentScore + FRUITS[tier].points;
+          
+          const updates = {
+            flipped: [],
+            matched: newMatched
+          };
+          updates[`${fieldPrefix}.score`] = newScore;
+          
+          // Check win condition (16 cards total matched)
+          if (newMatched.length === 16) {
+            const oppScore = isPlayer1 ? currentRoomData.player2.score : currentRoomData.player1.score;
+            if (newScore > oppScore) {
+              updates.status = isPlayer1 ? 'player1_won' : 'player2_won';
+            } else if (newScore < oppScore) {
+              updates.status = isPlayer1 ? 'player2_won' : 'player1_won';
+            } else {
+              updates.status = 'draw';
+            }
           }
-        }
-        
-        // Increment combo for next match
-        comboMultiplier++;
-        comboEl.innerText = `x${comboMultiplier}`;
-        
-        activePairsLeft--;
-        if (activePairsLeft === 0) {
-          triggerGameWin();
-        }
-        
-        firstCard = null;
-        secondCard = null;
-        lockBoard = false;
-      }, 450);
-      
-    } else {
-      // Mismatch
-      lockBoard = true;
-      firstCard.classList.add('shaking');
-      secondCard.classList.add('shaking');
-      
-      mismatchTimeout = setTimeout(() => {
-        playMismatchSound();
-        firstCard.classList.remove('flipped', 'shaking');
-        secondCard.classList.remove('flipped', 'shaking');
-        
-        // Reset combo multiplier
-        comboMultiplier = 1;
-        comboEl.innerText = "x1";
-        
-        firstCard = null;
-        secondCard = null;
-        lockBoard = false;
-        mismatchTimeout = null;
-      }, 1000);
+          
+          await updateRoomGameData(roomCode, updates);
+          lockBoard = false;
+        }, 600);
+      } else {
+        // Mismatch!
+        setTimeout(async () => {
+          // Shake them locally
+          const firstCardEl = document.querySelector(`.card[data-index="${firstIdx}"]`);
+          const secondCardEl = document.querySelector(`.card[data-index="${secondIdx}"]`);
+          if (firstCardEl) firstCardEl.classList.add('shaking');
+          if (secondCardEl) secondCardEl.classList.add('shaking');
+          
+          playMismatchSound();
+          
+          setTimeout(async () => {
+            // Flip back and change turn
+            const nextTurn = currentRoomData.turn === 'player1' ? 'player2' : 'player1';
+            await updateRoomGameData(roomCode, {
+              flipped: [],
+              turn: nextTurn
+            });
+            lockBoard = false;
+          }, 800);
+        }, 800);
+      }
     }
-  }
-}
-
-// --- Rock Punishment Interaction ---
-function handleRockHit(card) {
-  const rock = card.querySelector('.rock-overlay');
-  if (!rock) return;
-  
-  let hits = parseInt(card.dataset.rockHits || 0) + 1;
-  card.dataset.rockHits = hits;
-  
-  // Shaking keyframe animation on the rock overlay
-  rock.classList.add('shaking');
-  setTimeout(() => rock.classList.remove('shaking'), 250);
-  
-  if (hits >= 3) {
-    // Break rock!
-    rock.remove();
-    card.classList.remove('has-rock');
-    card.dataset.rockHits = 0;
-    playRockBreakSound();
-    createParticles(card, '#7f8c8d');
   } else {
-    // Normal hit
-    playRockHitSound();
-  }
-}
+    // --- SOLO MODE LOCAL LOGIC ---
+    if (card.classList.contains('flipped') || card.classList.contains('matched')) return;
 
-// Send punishments from opponent
-function applyRockPunishments(count) {
-  const cards = Array.from(document.querySelectorAll('.card'));
-  
-  // Filter for valid target cards: not flipped, not matched, doesn't already have rock
-  let targets = cards.filter(c => 
-    !c.classList.contains('flipped') && 
-    !c.classList.contains('matched') && 
-    !c.classList.contains('has-rock')
-  );
-  
-  for (let i = 0; i < count; i++) {
-    if (targets.length === 0) break;
-    
-    // Pick random target
-    const idx = Math.floor(Math.random() * targets.length);
-    const targetCard = targets.splice(idx, 1)[0];
-    
-    targetCard.classList.add('has-rock');
-    targetCard.dataset.rockHits = 0;
-    
-    const rockDiv = document.createElement('div');
-    rockDiv.className = 'rock-overlay';
-    rockDiv.innerText = '🪨';
-    targetCard.appendChild(rockDiv);
+    // Reset pending mismatch immediately on third click
+    if (mismatchTimeout) {
+      clearTimeout(mismatchTimeout);
+      mismatchTimeout = null;
+      if (firstCard) firstCard.classList.remove('flipped', 'shaking');
+      if (secondCard) secondCard.classList.remove('flipped', 'shaking');
+      firstCard = null;
+      secondCard = null;
+      lockBoard = false;
+    }
+
+    card.classList.add('flipped');
+    playFlipSound();
+
+    if (!firstCard) {
+      firstCard = card;
+    } else if (!secondCard) {
+      secondCard = card;
+      movesCount++;
+      movesEl.innerText = movesCount;
+      
+      if (firstCard.dataset.tier === secondCard.dataset.tier) {
+        // Match!
+        lockBoard = true;
+        const tier = parseInt(firstCard.dataset.tier);
+        const c1 = firstCard;
+        const c2 = secondCard;
+        
+        setTimeout(() => {
+          c1.classList.add('matched');
+          c2.classList.add('matched');
+          
+          createParticles(c1, FRUITS[tier].color);
+          createParticles(c2, FRUITS[tier].color);
+          
+          currentScore += FRUITS[tier].points * comboMultiplier;
+          scoreEl.innerText = currentScore;
+          
+          playMergeSound(tier);
+          
+          comboMultiplier++;
+          comboEl.innerText = `x${comboMultiplier}`;
+          
+          activePairsLeft--;
+          if (activePairsLeft === 0) {
+            triggerGameWin();
+          }
+          
+          firstCard = null;
+          secondCard = null;
+          lockBoard = false;
+        }, 450);
+      } else {
+        // Mismatch
+        lockBoard = true;
+        firstCard.classList.add('shaking');
+        secondCard.classList.add('shaking');
+        
+        mismatchTimeout = setTimeout(() => {
+          playMismatchSound();
+          firstCard.classList.remove('flipped', 'shaking');
+          secondCard.classList.remove('flipped', 'shaking');
+          
+          comboMultiplier = 1;
+          comboEl.innerText = "x1";
+          
+          firstCard = null;
+          secondCard = null;
+          lockBoard = false;
+          mismatchTimeout = null;
+        }, 1000);
+      }
+    }
   }
 }
 
@@ -607,7 +628,6 @@ function createParticles(element, color) {
   const rect = element.getBoundingClientRect();
   const containerRect = document.getElementById('game-container').getBoundingClientRect();
   
-  // Calculate relative coordinates
   const x = rect.left - containerRect.left + rect.width / 2;
   const y = rect.top - containerRect.top + rect.height / 2;
   
@@ -633,8 +653,7 @@ function createParticles(element, color) {
     const tx = Math.cos(angle) * distance;
     const ty = Math.sin(angle) * distance;
     
-    // Force DOM flow update
-    p.offsetHeight;
+    p.offsetHeight; // Force reflow
     
     p.style.transform = `translate(${tx}px, ${ty}px) scale(0)`;
     p.style.opacity = '0';
@@ -703,7 +722,6 @@ function triggerGameWin() {
   loadLeaderboard();
 
   if (isMultiplayer) {
-    updateRoomState(roomCode, isPlayer1, {}, isPlayer1 ? 'player1_won' : 'player2_won');
     if (unsubscribeRoom) {
       unsubscribeRoom();
       unsubscribeRoom = null;
@@ -711,7 +729,6 @@ function triggerGameWin() {
   }
 }
 
-// --- Trigger loss from opponent score/status update ---
 function triggerLoss() {
   if (isGameOver) return;
   isGameOver = true;
@@ -736,8 +753,31 @@ function triggerLoss() {
   }
 }
 
+function triggerDraw() {
+  if (isGameOver) return;
+  isGameOver = true;
+  isGameActive = false;
+  
+  document.getElementById('game-over-title').innerText = "¡Empate! 🤝";
+  finalScoreEl.innerText = currentScore;
+  finalMovesEl.innerText = movesCount;
+  
+  document.getElementById('submit-score-section').style.display = 'flex';
+  document.getElementById('player-name').value = '';
+  const submitBtn = document.getElementById('submit-score-btn');
+  submitBtn.disabled = false;
+  submitBtn.innerText = 'Guardar Puntaje';
+  
+  gameOverScreen.classList.remove('hidden');
+  loadLeaderboard();
+
+  if (isMultiplayer && unsubscribeRoom) {
+    unsubscribeRoom();
+    unsubscribeRoom = null;
+  }
+}
+
 function triggerWin() {
-  // Safe helper to transition to victory from Firestore trigger
   triggerGameWin();
 }
 
