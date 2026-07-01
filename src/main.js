@@ -78,48 +78,6 @@ function playMergeSound(tier) {
   osc2.stop(audioCtx.currentTime + 0.25);
 }
 
-function playRockHitSound() {
-  if (audioCtx.state === 'suspended') return;
-  const osc = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain();
-  osc.type = 'triangle';
-  osc.frequency.setValueAtTime(140, audioCtx.currentTime);
-  osc.frequency.linearRampToValueAtTime(70, audioCtx.currentTime + 0.12);
-  gainNode.gain.setValueAtTime(0.25, audioCtx.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.12);
-  osc.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-  osc.start();
-  osc.stop(audioCtx.currentTime + 0.12);
-}
-
-function playRockBreakSound() {
-  if (audioCtx.state === 'suspended') return;
-  const osc1 = audioCtx.createOscillator();
-  const osc2 = audioCtx.createOscillator();
-  const gainNode = audioCtx.createGain();
-  
-  osc1.type = 'sawtooth';
-  osc1.frequency.setValueAtTime(180, audioCtx.currentTime);
-  osc1.frequency.linearRampToValueAtTime(45, audioCtx.currentTime + 0.22);
-  
-  osc2.type = 'triangle';
-  osc2.frequency.setValueAtTime(750, audioCtx.currentTime);
-  osc2.frequency.exponentialRampToValueAtTime(1400, audioCtx.currentTime + 0.18);
-  
-  gainNode.gain.setValueAtTime(0.16, audioCtx.currentTime);
-  gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.22);
-  
-  osc1.connect(gainNode);
-  osc2.connect(gainNode);
-  gainNode.connect(audioCtx.destination);
-  
-  osc1.start();
-  osc2.start();
-  osc1.stop(audioCtx.currentTime + 0.22);
-  osc2.stop(audioCtx.currentTime + 0.22);
-}
-
 // BGM System
 let bgmGain = null;
 let bgmInterval = null;
@@ -163,7 +121,7 @@ function startBGM() {
   }, 2600);
 }
 
-// --- Fruit Configuration (20 items for Level 2 & 3 support) ---
+// --- Fruit Configuration (20 items for Level 2 support) ---
 const FRUITS = [
   { name: "Arándano", color: '#4d4dff', emoji: '🫐', points: 10 },
   { name: "Cereza", color: '#ff4d4d', emoji: '🍒', points: 20 },
@@ -193,7 +151,7 @@ let movesCount = 0;
 let comboMultiplier = 1;
 let isGameOver = false;
 let isGameActive = false; // Prevents card grid from rebuilding on snapshot updates
-let currentLevel = 1; // Level state (ranges 1 to 3)
+let currentLevel = 1; // Level state (ranges 1 to 2)
 
 // Card logic (Solo Mode)
 let firstCard = null;
@@ -343,7 +301,7 @@ function startGame(roomData = null) {
 }
 
 function handleMultiplayerUpdates(data) {
-  // If the deck changed, it means we transitioned to a new level! Rebuild the grid.
+  // If the deck changed, it means we transitioned to Level 2! Rebuild the grid.
   if (currentRoomData && data.deck && JSON.stringify(currentRoomData.deck) !== JSON.stringify(data.deck)) {
     currentRoomData = data;
     resetGame(data);
@@ -359,12 +317,12 @@ function handleMultiplayerUpdates(data) {
   
   // Check if level has been completed (matched count equals total deck size)
   if (data.deck && matchedIndices.length === data.deck.length) {
-    if (data.level < 3) {
-      // Level 1 or 2 completed: show Level Complete modal
+    if (data.level < 2) {
+      // Level 1 completed: show Level Complete modal
       showLevelCompleteModal(data.level);
       return;
     } else {
-      // Level 3 completed: handle final tournament outcome
+      // Level 2 completed: handle final tournament outcome
       if (data.status === 'player1_won') {
         if (isPlayer1) triggerWin(); else triggerLoss();
         return;
@@ -440,22 +398,6 @@ function handleMultiplayerUpdates(data) {
       card.classList.remove('flipped', 'matched', 'shaking');
     }
   });
-
-  // Apply initial rock blocks if in Level 3
-  if (data.level === 3 && data.rocks) {
-    data.rocks.forEach(idx => {
-      const cardEl = cards.find(c => parseInt(c.dataset.index) === idx);
-      if (cardEl && !cardEl.classList.contains('has-rock') && !matchedIndices.includes(idx)) {
-        cardEl.classList.add('has-rock');
-        cardEl.dataset.rockHits = 0;
-        
-        const rockDiv = document.createElement('div');
-        rockDiv.className = 'rock-overlay';
-        rockDiv.innerText = '🪨';
-        cardEl.appendChild(rockDiv);
-      }
-    });
-  }
 }
 
 function resetGame(roomData = null) {
@@ -505,11 +447,6 @@ function resetGame(roomData = null) {
     const deck = generateRandomDeckForLevel(currentLevel);
     buildGrid(deck);
     
-    // Level 3 Solo initial rock obstacle placements
-    if (currentLevel === 3) {
-      setTimeout(() => applyInitialSoloRocks(4), 100);
-    }
-    
     turnIndicator.classList.add('hidden');
   }
   
@@ -517,26 +454,7 @@ function resetGame(roomData = null) {
   startBGM();
 }
 
-function applyInitialSoloRocks(count) {
-  const cards = Array.from(document.querySelectorAll('.card'));
-  const targets = [...cards];
-  
-  for (let i = 0; i < count; i++) {
-    if (targets.length === 0) break;
-    const idx = Math.floor(Math.random() * targets.length);
-    const targetCard = targets.splice(idx, 1)[0];
-    
-    targetCard.classList.add('has-rock');
-    targetCard.dataset.rockHits = 0;
-    
-    const rockDiv = document.createElement('div');
-    rockDiv.className = 'rock-overlay';
-    rockDiv.innerText = '🪨';
-    targetCard.appendChild(rockDiv);
-  }
-}
-
-// Generate shuffled deck layout for a given level (8 pairs for L1, 18 pairs for L2 & L3)
+// Generate shuffled deck layout for a given level (8 pairs for L1, 18 pairs for L2)
 function generateRandomDeckForLevel(level) {
   const numPairs = (level === 1) ? 8 : 18;
   const allTiers = Array.from({length: 20}, (_, i) => i);
@@ -550,7 +468,7 @@ function generateRandomDeckForLevel(level) {
   // Fisher-Yates shuffle
   for (let i = deck.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
+    [deck[j], deck[i]] = [deck[i], deck[j]];
   }
   return deck;
 }
@@ -595,11 +513,6 @@ function handleCardClick(card) {
 
   const idx = parseInt(card.dataset.index);
 
-  if (card.classList.contains('has-rock')) {
-    handleRockHit(card);
-    return;
-  }
-
   if (isMultiplayer) {
     // --- MULTIPLAYER TURN-BASED SHARING BOARD LOGIC ---
     if (!currentRoomData) return;
@@ -640,7 +553,7 @@ function handleCardClick(card) {
           
           // Check win condition (all cards matched)
           if (newMatched.length === deck.length) {
-            if (currentRoomData.level === 3) {
+            if (currentRoomData.level === 2) {
               // Final tournament level completed: declare winner
               const oppScore = isPlayer1 ? currentRoomData.player2.score : currentRoomData.player1.score;
               if (newScore > oppScore) {
@@ -725,7 +638,7 @@ function handleCardClick(card) {
           
           activePairsLeft--;
           if (activePairsLeft === 0) {
-            if (currentLevel < 3) {
+            if (currentLevel < 2) {
               showLevelCompleteModal(currentLevel);
             } else {
               triggerGameWin();
@@ -757,28 +670,6 @@ function handleCardClick(card) {
         }, 1000);
       }
     }
-  }
-}
-
-// --- Rock Punishment Interaction ---
-function handleRockHit(card) {
-  const rock = card.querySelector('.rock-overlay');
-  if (!rock) return;
-  
-  let hits = parseInt(card.dataset.rockHits || 0) + 1;
-  card.dataset.rockHits = hits;
-  
-  rock.classList.add('shaking');
-  setTimeout(() => rock.classList.remove('shaking'), 250);
-  
-  if (hits >= 3) {
-    rock.remove();
-    card.classList.remove('has-rock');
-    card.dataset.rockHits = 0;
-    playRockBreakSound();
-    createParticles(card, '#7f8c8d');
-  } else {
-    playRockHitSound();
   }
 }
 
@@ -866,7 +757,7 @@ function showLevelCompleteModal(level) {
   finalScoreEl.innerText = currentScore;
   finalMovesEl.innerText = movesCount;
   
-  // Hide submit score (only allowed after Level 3 final victory)
+  // Hide submit score (only allowed after final victory)
   document.getElementById('submit-score-section').style.display = 'none';
   
   // Show Next Level button
@@ -891,16 +782,6 @@ async function progressMultiplayerLevel() {
     status: 'playing'
   };
   
-  // Sync rock coordinates for Level 3
-  if (nextLevel === 3) {
-    const rockIndices = [];
-    while (rockIndices.length < 4) {
-      const r = Math.floor(Math.random() * 36);
-      if (!rockIndices.includes(r)) rockIndices.push(r);
-    }
-    updates.rocks = rockIndices;
-  }
-  
   await updateRoomGameData(roomCode, updates);
 }
 
@@ -913,7 +794,7 @@ function triggerGameWin() {
   
   triggerConfetti();
   
-  document.getElementById('game-over-title').innerText = isMultiplayer ? "¡Victoria Total! 🏆" : "¡Victoria Total! 🏆";
+  document.getElementById('game-over-title').innerText = "¡Victoria Total! 🏆";
   finalScoreEl.innerText = currentScore;
   finalMovesEl.innerText = movesCount;
   
